@@ -1,144 +1,145 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
-from bs4 import BeautifulSoup
-import requests
+import sys
+import time
+import argparse
+import urllib.parse
+from urllib.parse import urlparse
 import json
+import requests
 
-
-URL = "http://jakzawszetazla.tumblr.com/"
-LNAME = 'Tumblr'
-POST_IID = 1
-NUMBER_OF_PAGES = 50
-CHUNK_SIZE = 50
-
-
-class Post(object):
-    def __init__(self):
-        self.lname = ''
-        self.url = ''
+class TumblrPost:
+    def __init__(self, post_url, post_date, post_title, post_body):
         self.iid = 0
         self.id = 0
-        self.category = ''
-        self.title = ''
-        self.date = ''
-        self.text = ''
-
-        self.more_link = ''
-        self.full_text = ''
-
-    def __str__(self):
-        return '; '.join((str(self.lname),
-                          str(self.url),
-                          str(self.iid),
-                          str(self.id),
-                          str(self.category),
-                          str(self.title),
-                          str(self.date),
-                          str(self.text)))
-
+        self.lname = "tumblr.com"
+        self.post_url = post_url
+        self.post_date = post_date        
+        if post_title is None or post_title == '':
+            self.post_title = ''
+        else:
+            self.post_title = post_title
+        if post_body is None or post_body == '':
+            self.post_body = ''
+        else:
+            self.post_body = post_body
 
 def save_as_json(post):
     return json.dumps({"lname": post.lname,
-                       "url": post.url,
+                       "url": post.post_url,
                        "iid": post.iid,
                        "id": post.id,
-                       "category": post.category,
-                       "title": post.title,
-                       "date": post.date,
-                       "text": post.text}, sort_keys=True, indent=4)
+                       "title": u"{}".format(post.post_title),
+                       "content": u"{}".format(post.post_body),
+                       "date": post.post_date,}, sort_keys=True, indent=4)
 
+def get_blog_url(name):
+    return "http://{name}.tumblr.com/api/read/json".format(name=name)
 
-def extract_post(main_div, url):
-    """Extract post from main div
-    """
-    post = Post()
-    global LNAME
-    post.lname = LNAME
-    global POST_IID
-    post.iid = POST_IID
-    POST_IID += 1
-    post.id = post.iid - 1
-    post.url = url
+def get_json_page(url, start=0, num=50):
+    args = {}
+    args['start'] = start
+    args['num'] = num
 
-    for div in main_div.find_all('div'):
-        print('found2')
-        if 'post-excerpt__category' in div.get('class'):
-            post.category = div.contents[0].strip()
-        elif 'date-note-wrapper' in div.get('class'):
-            post.date = div.contents[0].strip()
-        elif 'post-content' in div.get('class'):
-            print('found')
-            for fill in div.find_all('a'):
-                post.text = ''.join(fill.findAll(text=True))
-                #post.text = fill.contents[0].strip()
+    # Fetch the page
+    r = requests.get(url, params=args)
 
-    for header in main_div.find_all('h2'):
-        if 'title' in header.get('class'):
-            #for link in header.find_all('a'): 
-            post.title = header.contents[0]
+    # Strip the jsonp garbage
+    text = r.text.strip()[22:-1]
+    if "regular-title" in text:
+        print("ok")
 
-    return save_as_json(post)
+    # Return the result as a dict
+    return json.loads(text)
 
+def uprint(*objects, sep=' ', end='\n', file=sys.stdout):
+    enc = file.encoding
+    if enc == 'UTF-8':
+        print(*objects, sep=sep, end=end, file=file)
+    else:
+        f = lambda obj: str(obj).encode(enc, errors='backslashreplace').decode(enc)
+        print(*map(f, objects), sep=sep, end=end, file=file)
 
-def crawl_page(url):
-    """Retrieve whole page data
-    """
-    request = requests.get(url)
-    data = request.text
-    soup = BeautifulSoup(data, 'html.parser')
+def print_post(json, all_posts):
+    found = False
+    if 'tags' in json:
+        tags = json['tags']
+        #uprint(tags)
+        if json['type'] == 'quote':
+            body = json['quote-text']
+            body = u"{}".format(body)
+            #print(u"{}".format(body))
+            title = ''
+            found = True
 
-    posts = []
-    for div in soup.find_all('div'):
-        if div.get('class') == None:
-            continue
-        elif 'data-page-id' in div.get('class'):
-            print('found3')
-            post = extract_post(div, url)
-            posts.append(post)
-    return posts
+        if json['type'] == 'regular':
+            if "regular-body" in json:
+                body = json['regular-body']
+                body = u"{}".format(body)
+            else:
+                body = ''
+            if "regular-title" in json:
+                title = json['regular-title']
+                title = u"{}".format(title)
+            else:
+                title = ''
+            found = True
 
-
-def save_to_file(chunk, chunk_no):
-    fname = 'uj_posts_{}'.format(chunk_no)
-    with open(fname, 'w') as f:
-        for post in chunk:
-            f.write(str(post) + '\n')
-
-
-def split_into_chunks(l, n):
-    """Yield successive n-sized chunks from a list.
-    """
-    for i in range(0, len(l), n):
-        yield l[i:i + n]
-
+        if found:
+            p = TumblrPost(json['url'], json['date-gmt'], u"{}".format(title), u"{}".format(body))
+            all_posts.append(p)
 
 def main():
-    """Main function
-    """
-    print('Crawling {} pages from http://www.uj.edu.pl ...'.format(NUMBER_OF_PAGES))
+    # Create our parser
+    global parser
+    parser = argparse.ArgumentParser(prog='tumblr-scraper',
+            description='Get Tumblr blog posts')
+
+    # Set up our command-line arguments
+    parser.add_argument('blog_name')   
+
+    # Get our arguments
+    args = parser.parse_args()
+
+    # Get our args
+    blog_name = args.blog_name
+    blog_url = get_blog_url(blog_name)
+
+    # Get the total post count
+    json = get_json_page(blog_url, 0, 0)
+    total_count = json['posts-total']
+
+    # INFO
+    uprint('Total posts: %s' % (total_count,))
+
+    # Start our elapsed timer
+    start_time = time.time()
+
+    # This is the main loop. We'll loop over each page of post
+    # results until we've archived the entire blog.
     all_posts = []
-    for page_no in range(1, 51): #575
-        url = '{0}&strona={1}'.format(URL, page_no)
-        posts = crawl_page(url)
-        all_posts.extend(posts)
+    start = 0
+    per_page = 50
+    while start < total_count:
+        json = get_json_page(blog_url, start)
 
-    if all_posts:
-        print('Number of posts extracted: {}'.format(len(all_posts)))
-        print('Saving posts to files ...')
-        chunks = split_into_chunks(all_posts, CHUNK_SIZE)
-        for chunk_no, chunk in enumerate(chunks):
-            save_to_file(chunk, chunk_no + 1)
-        print('Posts saved.')
-    else:
-        print('No posts extracted.')
+        # Loop over each post in this batch
+        for post in json['posts']:
+            print_post(post, all_posts)
 
+        # Increment and grab the next batch of posts
+        start += per_page
+
+    with open('test3', 'w', encoding='utf-8') as f:
+        for post in all_posts:
+            f.write(save_as_json(post))
+
+    # INFO
+    minutes, seconds = divmod(time.time() - start_time, 60)
+    uprint('Got {count} posts in {m:02d}m and {s:02d}s'.format(\
+            count=total_count, m=int(round(minutes)), s=int(round(seconds))))
 
 if __name__ == '__main__':
-    #main()
-	print('crawling...')
-	post = crawl_page(URL)
-	print('saving...')
-	with open('test', 'w') as f:
-		f.write(str(post))
-	print('done')
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit()
