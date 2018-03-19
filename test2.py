@@ -79,14 +79,14 @@ if __name__ == '__main__':
         total_posts = tumblr_response["response"]["total_posts"]
         for post in tumblr_response['response']['posts']:
             # Do something with the JSON info here
-            p = TumblrPost(post['post_url'], post['date'], post['body'], '', post['title'])
+            
+        offset = offset + 20p = TumblrPost(post['post_url'], post['date'], post['body'], '', post['title'])
             all_posts.append(p)
             all_posts.append(post)
-        offset = offset + 20
         if offset > total_posts:
             posts_still_left = False
 
-    with open('test3', 'w', encoding='utf-8') as f:
+    with open('test', 'w', encoding='utf-8') as f:
         for post in all_posts:
             f.write(str(post))
     # info = client.blog_info('jakzawszetazla')
