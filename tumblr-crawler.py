@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 
 # TO DO:
-#     data - zmienić format
-#     iid
 #     pobrać posty z 100 blogów
 #     json order not working
  
@@ -18,21 +16,21 @@ from collections import OrderedDict
 import hashlib 
  
 class TumblrPost:
-    def __init__(self, post_id, post_url, post_date, post_title, post_body):
-        self.iid = 0
-        self.id = post_id
+
+    def __init__(self, post_iid, post_url, post_date, post_title, post_body):
+        self.iid = post_iid
+        self.id = post_iid + "-1"
         self.lname = "tumblr.com"
         self.post_url = post_url
-        self.post_date = post_date        
-        if post_title is None or post_title == '':
-            self.post_title = ''
-        else:
-            self.post_title = post_title
-        if post_body is None or post_body == '':
-            self.post_body = ''
-        else:
-            self.post_body = post_body
- 
+        self.post_date = post_date
+        self.post_title = self.check_if_empty(post_title)
+        self.post_body = self.check_if_empty(post_body)
+
+    def check_if_empty(self, text):
+        if text is None or text == "":
+            text = ""
+        return text
+
 def save_as_json(post):
     post_lname = post.lname
     post_url = post.post_url
@@ -41,16 +39,26 @@ def save_as_json(post):
     post_title = post.post_title
     post_content = post.post_body
     post_date = post.post_date
-    post_dict = OrderedDict(lname= post_lname, url= post_url, iid= post_iid, id= post_id, title= post_title, content= post_content, duration_start= post_date, duration_end= post_date)
-    # return json.dumps({"lname": post.lname,
-    #                    "url": post.post_url,
-    #                    "iid": post.iid,
-    #                    "id": post.id,
-    #                    "title": post.post_title,
-    #                    "content": post.post_body,
-    #                    "duration_start": post.post_date,
-    #                    "duration_end": post.post_date}, object_pairs_hook=OrderedDict, sort_keys=False, indent=4, ensure_ascii=False)
-    return json.dumps(post_dict, indent=4, ensure_ascii=False)
+    return ({"lname": post.lname,
+                       "url": post.post_url,
+                       "iid": post.iid,
+                       "id": post.id,
+                       "title": post.post_title,
+                       "content": post.post_body,
+                       "duration_start": post.post_date,
+                       "duration_end": post.post_date})
+    # post_dict = OrderedDict(
+    #     lname= post_lname,
+    #     url= post_url,
+    #     iid= post_iid,
+    #     id= post_id,
+    #     title= post_title,
+    #     content= post_content,
+    #     duration_start= post_date,
+    #     duration_end= post_date
+    # )
+    # #return json.dumps(post_dict, indent=4, ensure_ascii=False)
+    # return post_dict
 
 def remove_html_tags(text):
     import re
@@ -70,8 +78,6 @@ def get_json_page(url, start=0, num=50):
  
     # Strip the jsonp garbage
     text = r.text.strip()[22:-1]
-    if "regular-title" in text:
-        print("ok")
  
     # Return the result as a dict
     return json.loads(text)
@@ -83,45 +89,45 @@ def uprint(*objects, sep=' ', end='\n', file=sys.stdout):
     else:
         f = lambda obj: str(obj).encode(enc, errors='backslashreplace').decode(enc)
         print(*map(f, objects), sep=sep, end=end, file=file)
- 
-def get_post(json, all_posts):
+
+def create_title(body):
+    words_body = body.split()
+    if len(words_body) > 6:
+        title = " ".join(words_body[:6])
+    else:
+        title = body
+    title += "..."
+    return title
+
+def get_and_save_post(json_page, all_posts):
     found = False
-    if 'tags' in json:
-        tags = json['tags']
-        #uprint(tags)
-        if json['type'] == 'quote':
-            body = json['quote-text']
-            body = u"{}".format(body)
-            #print(u"{}".format(body))
-            title = ''
+    if 'tags' in json_page:
+        
+        if json_page['type'] == 'quote':
+            
+            body = json_page['quote-text']
+            title = ""
             found = True
  
-        if json['type'] == 'regular':
-            if "regular-body" in json:
-                body = json['regular-body']
-                body = u"{}".format(body)
-            else:
-                body = ''
-            if "regular-title" in json:
-                title = json['regular-title']
-                title = u"{}".format(title)
-            else:
-                title = ''
+        if json_page['type'] == 'regular':
+
+            body = json_page['regular-body'] if "regular-body" in json_page else ""
+            title = json_page['regular-title'] if "regular-title" in json_page else ""
             found = True
  
         if found:
-            if title == '':
-                words_body = body.split()
-                if len(words_body) >= 6:
-                    title = ' '.join(words_body[:6])
-                else:
-                    title = body
-                title += '...'
+            title = create_title(body) if title == '' else title
 
-            #m = hashlib.md5()
-            post_id = hashlib.md5(json['url'].encode('utf-8')).hexdigest()
+            # Create iid for solar
+            post_iid = hashlib.md5(json_page['url'].encode('utf-8')).hexdigest()
+            # Date format for solar
+            date = json_page['date-gmt'].split(' ')
+            post_date = '{}T{}Z'.format(date[0], date[1])
 
-            p = TumblrPost(post_id, json['url'], json['date-gmt'], html.unescape(remove_html_tags(title)), html.unescape(remove_html_tags(body)))
+            body = html.unescape(remove_html_tags(u"{}".format(body)))
+            title = html.unescape(remove_html_tags(u"{}".format(title)))
+
+            p = TumblrPost(post_iid, json_page['url'], post_date, title, body)
             all_posts.append(p)
  
 def main():
@@ -130,42 +136,64 @@ def main():
             #description='Get Tumblr blog posts')
  
     # Set up our command-line arguments
-    #parser.add_argument('blog_name')   
- 
-    #args = parser.parse_args()
- 
+    #parser.add_argument('blog_name') 
+    #args = parser.parse_args() 
     #blog_name = args.blog_name
+
     blog_name = 'czytanki'
-    blog_url = get_blog_url(blog_name)
- 
-    json = get_json_page(blog_url, 0, 0)
-    total_count = json['posts-total']
- 
+    blog_url = get_blog_url(blog_name) 
+    json_page = get_json_page(blog_url, 0, 0)
+    total_count = json_page['posts-total'] 
     uprint('Total posts: %s' % (total_count,))
  
     start_time = time.time()
 
+    # Get posts
     all_posts = []
     start = 0
     per_page = 50
     while start < total_count:
-        json = get_json_page(blog_url, start)
+        json_page = get_json_page(blog_url, start)
  
-        for post in json['posts']:
-            get_post(post, all_posts)
+        for post in json_page['posts']:
+            get_and_save_post(post, all_posts)
  
         # Increment and grab the next batch of posts
         start += per_page
- 
+
+    # Save to file
     with open('posts.json', 'w', encoding='utf-8') as f:
+        posts = {}
+        posts['posts'] = []
         for post in all_posts:
-            f.write(save_as_json(post))
-            f.write('\n')
+            posts['posts'].append(save_as_json(post))
+        f.write(json.dumps(posts, indent=4, ensure_ascii=False))
  
     minutes, seconds = divmod(time.time() - start_time, 60)
     uprint('Got {count} posts in {m:02d}m and {s:02d}s'.format(\
             count=total_count, m=int(round(minutes)), s=int(round(seconds))))
- 
+
+    add_to_solar()
+
+def add_to_solar():
+    # server = 
+    # core = 'isi'
+    # url = 'http://%s:8983/solr/%s/update/json/docs?commit=true' % (server, core)
+
+    posts = []
+    with open('posts.json', encoding='utf-8') as get_post:
+        tmp = json.load(get_post)
+
+    for p in tmp['posts']:
+        posts.append(p)
+
+        # data = json.dumps(p, ensure_ascii=False)
+        # req = urllib2.Request(url, data)
+        # req.add_header('Content-type', 'application/json')
+        # response = urllib2.urlopen(req)
+        # the_page = response.read()
+        # print(the_page)
+
 if __name__ == '__main__':
     try:
         sys.exit(main())
